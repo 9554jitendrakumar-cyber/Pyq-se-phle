@@ -1,0 +1,379 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Safety Net (Default Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    // Bootstrapped Owner / Super Admin check (verified email check prevents spoofing)
+    function isSuperAdminEmail() {
+      return isSignedIn() && isVerified() && request.auth.token.email == '9554jitendrakumar@gmail.com';
+    }
+
+    function isAdmin() {
+      return isSuperAdminEmail() || (isSignedIn() && isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isParentConfigAccessible(userId) {
+      return isSuperAdminEmail() || (
+        userId == request.auth.uid &&
+        exists(/databases/$(database)/documents/user_configs/$(userId)) &&
+        get(/databases/$(database)/documents/user_configs/$(userId)).data.ownerId == request.auth.uid
+      );
+    }
+
+    // Entity Validation Blueprints (Pillar 2)
+    function isValidPlatformPolicy(data) {
+      return data.keys().hasAll(['updatedBy', 'defaultStudentQuota', 'retentionDays', 'allowStudentUploads', 'platformBanner', 'updatedAt']) &&
+        data.keys().hasOnly(['updatedBy', 'defaultStudentQuota', 'retentionDays', 'allowStudentUploads', 'platformBanner', 'instituteName', 'instituteTagline', 'maxPages10Marker', 'maxPages15Marker', 'ownerWhatsappNumber', 'ownerUpiId', 'quotaPlanSummary', 'paymentApprovalMode', 'updatedAt']) &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedBy.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.updatedBy == request.auth.uid &&
+        data.defaultStudentQuota is number && data.defaultStudentQuota >= 0 && data.defaultStudentQuota <= 10000 &&
+        data.retentionDays is number && data.retentionDays >= 1 && data.retentionDays <= 3650 &&
+        data.allowStudentUploads is bool &&
+        data.platformBanner is string && data.platformBanner.size() <= 500 &&
+        (!('instituteName' in data) || (data.instituteName is string && data.instituteName.size() <= 120)) &&
+        (!('instituteTagline' in data) || (data.instituteTagline is string && data.instituteTagline.size() <= 200)) &&
+        (!('maxPages10Marker' in data) || (data.maxPages10Marker is number && data.maxPages10Marker >= 1 && data.maxPages10Marker <= 15)) &&
+        (!('maxPages15Marker' in data) || (data.maxPages15Marker is number && data.maxPages15Marker >= 1 && data.maxPages15Marker <= 20)) &&
+        (!('ownerWhatsappNumber' in data) || (data.ownerWhatsappNumber is string && data.ownerWhatsappNumber.size() <= 30)) &&
+        (!('ownerUpiId' in data) || (data.ownerUpiId is string && data.ownerUpiId.size() <= 100)) &&
+        (!('quotaPlanSummary' in data) || (data.quotaPlanSummary is string && data.quotaPlanSummary.size() <= 200)) &&
+        (!('paymentApprovalMode' in data) || (data.paymentApprovalMode is string && data.paymentApprovalMode in ['auto', 'manual'])) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStudentProfile(data) {
+      return data.keys().hasAll(['ownerId', 'displayName', 'email', 'role', 'status', 'quotaLimit', 'usedCount', 'joinedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'displayName', 'email', 'role', 'status', 'quotaLimit', 'usedCount', 'joinedAt', 'updatedAt']) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 200 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role is string && data.role in ['student', 'evaluator', 'owner'] &&
+        data.status is string && data.status in ['active', 'blocked'] &&
+        data.quotaLimit is number && data.quotaLimit >= 0 && data.quotaLimit <= 10000 &&
+        data.usedCount is number && data.usedCount >= 0 && data.usedCount <= 100000 &&
+        data.joinedAt is string && data.joinedAt.size() >= 1 && data.joinedAt.size() <= 64 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidQuotaRequest(data) {
+      return data.keys().hasAll(['requestId', 'ownerId', 'studentName', 'studentEmail', 'planTitle', 'copiesRequested', 'amountInr', 'utrNumber', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['requestId', 'ownerId', 'studentName', 'studentEmail', 'planTitle', 'copiesRequested', 'amountInr', 'utrNumber', 'status', 'createdAt', 'updatedAt']) &&
+        data.requestId is string && data.requestId.size() >= 1 && data.requestId.size() <= 128 &&
+        data.requestId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (data.ownerId == request.auth.uid || isSuperAdminEmail()) &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 200 &&
+        data.studentEmail is string && data.studentEmail.size() >= 3 && data.studentEmail.size() <= 200 &&
+        data.planTitle is string && data.planTitle.size() >= 1 && data.planTitle.size() <= 120 &&
+        data.copiesRequested is number && data.copiesRequested >= 1 && data.copiesRequested <= 10000 &&
+        data.amountInr is number && data.amountInr >= 1 && data.amountInr <= 100000 &&
+        data.utrNumber is string && data.utrNumber.size() >= 6 && data.utrNumber.size() <= 64 &&
+        data.status is string && data.status in ['pending', 'auto_approved', 'approved', 'rejected'] &&
+        data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['adminUid', 'email', 'grantedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['adminUid', 'email', 'grantedBy', 'updatedAt']) &&
+        data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+        data.adminUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128 &&
+        data.grantedBy == request.auth.uid &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserSyncConfig(data) {
+      return data.keys().hasAll(['ownerId', 'activeSlotId', 'promptSlots', 'modelSettings', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'activeSlotId', 'promptSlots', 'modelSettings', 'updatedAt']) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (data.ownerId == request.auth.uid || isSuperAdminEmail()) &&
+        data.activeSlotId is number && data.activeSlotId >= 1 && data.activeSlotId <= 10 &&
+        data.promptSlots is map && data.promptSlots.size() <= 20 &&
+        data.modelSettings is map && data.modelSettings.size() <= 30 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEvaluationRecord(data) {
+      return data.keys().hasAll(['ownerId', 'studentName', 'subject', 'obtainedMarks', 'maxMarks', 'evalData', 'evaluatedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'studentName', 'subject', 'obtainedMarks', 'maxMarks', 'evalData', 'evaluatedAt', 'updatedAt']) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (data.ownerId == request.auth.uid || isSuperAdminEmail()) &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 200 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 200 &&
+        data.obtainedMarks is number && data.obtainedMarks >= 0 && data.obtainedMarks <= 500 &&
+        data.maxMarks is number && data.maxMarks >= 1 && data.maxMarks <= 500 &&
+        data.evalData is map && data.evalData.size() <= 50 &&
+        data.evaluatedAt is string && data.evaluatedAt.size() >= 1 && data.evaluatedAt.size() <= 64 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLearningRecord(data) {
+      return data.keys().hasAll(['ownerId', 'studentName', 'logData', 'loggedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'studentName', 'logData', 'loggedAt', 'updatedAt']) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (data.ownerId == request.auth.uid || isSuperAdminEmail()) &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 200 &&
+        data.logData is map && data.logData.size() <= 30 &&
+        data.loggedAt is string && data.loggedAt.size() >= 1 && data.loggedAt.size() <= 64 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFeedbackReport(data) {
+      return data.keys().hasAll(['evaluationId', 'section', 'ownerId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['evaluationId', 'section', 'note', 'ownerId', 'createdAt', 'updatedAt']) &&
+        data.evaluationId is string && data.evaluationId.size() >= 1 && data.evaluationId.size() <= 128 &&
+        data.section is string && data.section.size() >= 1 && data.section.size() <= 100 &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 1000)) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        (data.ownerId == request.auth.uid || isSuperAdminEmail()) &&
+        data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64 &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. Global Platform Settings (/platform_settings/{configId})
+    match /platform_settings/{configId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(configId);
+      allow create: if isSignedIn() && isVerified() && isValidId(configId) &&
+        isValidPlatformPolicy(incoming()) &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isSignedIn() && isVerified() && isValidId(configId) &&
+        isValidPlatformPolicy(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['updatedBy', 'defaultStudentQuota', 'retentionDays', 'allowStudentUploads', 'platformBanner', 'instituteName', 'instituteTagline', 'maxPages10Marker', 'maxPages15Marker', 'ownerWhatsappNumber', 'ownerUpiId', 'quotaPlanSummary', 'paymentApprovalMode', 'updatedAt']) &&
+        isAdmin();
+      allow delete: if isSignedIn() && isVerified() && isValidId(configId) && isAdmin();
+    }
+
+    // 2. Registered Student & Evaluator Profiles (/student_profiles/{userId})
+    match /student_profiles/{userId} {
+      // PII Isolation: Only the profile owner or Admin can read a specific profile
+      allow get: if isSignedIn() && isVerified() && isValidId(userId) &&
+        (userId == request.auth.uid || isAdmin());
+
+      // Only Super Admin or the document owner can list student profiles
+      allow list: if isSuperAdminEmail() || (isSignedIn() && isVerified() && existing().ownerId == request.auth.uid);
+
+      allow create: if isSignedIn() && isVerified() && isValidId(userId) &&
+        isValidStudentProfile(incoming()) &&
+        incoming().ownerId == userId &&
+        incoming().updatedAt == request.time && (
+          isAdmin() || (
+            userId == request.auth.uid &&
+            incoming().email == request.auth.token.email &&
+            incoming().role == 'student' &&
+            incoming().status == 'active' &&
+            incoming().quotaLimit <= 25 &&
+            incoming().usedCount == 0
+          )
+        );
+
+      allow update: if isSignedIn() && isVerified() && isValidId(userId) &&
+        isValidStudentProfile(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().email == existing().email &&
+        incoming().joinedAt == existing().joinedAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Admin Override (Role, Status, Quota Limit, Usage Reset)
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'status', 'quotaLimit', 'usedCount', 'updatedAt'])) ||
+          // Action 2: Student Usage Increment (Strictly +1 when active and within quota)
+          (userId == request.auth.uid &&
+            existing().status == 'active' &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().quotaLimit == existing().quotaLimit &&
+            incoming().usedCount == existing().usedCount + 1 &&
+            incoming().usedCount <= existing().quotaLimit &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'usedCount', 'updatedAt'])
+          ) ||
+          // Action 3: Student Smart Auto-Verified UPI Quota Top-Up (Strictly +1 to +500 copies when active)
+          (userId == request.auth.uid &&
+            existing().status == 'active' &&
+            incoming().role == existing().role &&
+            incoming().status == existing().status &&
+            incoming().usedCount == existing().usedCount &&
+            incoming().quotaLimit > existing().quotaLimit &&
+            incoming().quotaLimit <= existing().quotaLimit + 500 &&
+            incoming().quotaLimit <= 10000 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'quotaLimit', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(userId) && isAdmin();
+    }
+
+    // 2B. Student UPI Payment & Quota Upgrade Requests (/quota_requests/{requestId})
+    match /quota_requests/{requestId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(requestId) &&
+        (isAdmin() || resource == null || existing().ownerId == request.auth.uid);
+
+      allow list: if isSuperAdminEmail() || (isSignedIn() && isVerified() && existing().ownerId == request.auth.uid);
+
+      allow create: if isSignedIn() && isVerified() && isValidId(requestId) &&
+        isValidQuotaRequest(incoming()) &&
+        incoming().requestId == requestId &&
+        (incoming().ownerId == request.auth.uid || isAdmin()) &&
+        incoming().status in ['pending', 'auto_approved'] &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified() && isValidId(requestId) &&
+        isValidQuotaRequest(incoming()) &&
+        incoming().requestId == existing().requestId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'copiesRequested', 'amountInr', 'utrNumber', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(requestId) && isAdmin();
+    }
+
+    // 2C. Evaluation Suggestion Feedback Reports (/feedback/{feedbackId})
+    match /feedback/{feedbackId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(feedbackId) &&
+        (isAdmin() || resource == null || existing().ownerId == request.auth.uid);
+
+      allow list: if isSuperAdminEmail() || (isSignedIn() && isVerified() && existing().ownerId == request.auth.uid);
+
+      allow create: if isSignedIn() && isVerified() && isValidId(feedbackId) &&
+        isValidFeedbackReport(incoming()) &&
+        (incoming().ownerId == request.auth.uid || isAdmin()) &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified() && isValidId(feedbackId) &&
+        isValidFeedbackReport(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().ownerId == request.auth.uid || isAdmin()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['section', 'note', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(feedbackId) && isAdmin();
+    }
+
+    // 3. Trusted Admin Registry (/admins/{adminUid})
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isVerified() && isValidId(adminUid) && (adminUid == request.auth.uid || isSuperAdminEmail());
+      allow create, update: if isSuperAdminEmail() && isValidId(adminUid) &&
+        isValidAdminRecord(incoming()) &&
+        incoming().adminUid == adminUid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isSuperAdminEmail() && isValidId(adminUid);
+    }
+
+    // 4. User Cloud Sync Configuration (/user_configs/{userId})
+    match /user_configs/{userId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(userId) &&
+        (userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() && isVerified() && isValidId(userId) &&
+        (userId == request.auth.uid || isSuperAdminEmail()) &&
+        isValidUserSyncConfig(incoming()) &&
+        incoming().ownerId == userId &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified() && isValidId(userId) &&
+        (userId == request.auth.uid || isSuperAdminEmail()) &&
+        isValidUserSyncConfig(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['activeSlotId', 'promptSlots', 'modelSettings', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(userId) &&
+        ((userId == request.auth.uid && existing().ownerId == request.auth.uid) || isSuperAdminEmail());
+
+      // 5. Evaluated Copy Scorecards Subcollection (/user_configs/{userId}/evaluations/{evalId})
+      match /evaluations/{evalId} {
+        allow get: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(evalId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isParentConfigAccessible(userId);
+
+        allow list: if isSuperAdminEmail() || (isSignedIn() && isVerified() &&
+          userId == request.auth.uid && existing().ownerId == request.auth.uid);
+
+        allow create: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(evalId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isValidEvaluationRecord(incoming()) &&
+          incoming().ownerId == userId &&
+          incoming().updatedAt == request.time &&
+          isParentConfigAccessible(userId);
+
+        allow update: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(evalId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isValidEvaluationRecord(incoming()) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().evaluatedAt == existing().evaluatedAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['studentName', 'subject', 'obtainedMarks', 'maxMarks', 'evalData', 'updatedAt']) &&
+          isParentConfigAccessible(userId);
+
+        allow delete: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(evalId) &&
+          ((userId == request.auth.uid && existing().ownerId == request.auth.uid) || isSuperAdminEmail()) &&
+          isParentConfigAccessible(userId);
+      }
+
+      // 6. AI Learning Database Logs Subcollection (/user_configs/{userId}/learning_logs/{logId})
+      match /learning_logs/{logId} {
+        allow get: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(logId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isParentConfigAccessible(userId);
+
+        allow list: if isSuperAdminEmail() || (isSignedIn() && isVerified() &&
+          userId == request.auth.uid && existing().ownerId == request.auth.uid);
+
+        allow create: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(logId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isValidLearningRecord(incoming()) &&
+          incoming().ownerId == userId &&
+          incoming().updatedAt == request.time &&
+          isParentConfigAccessible(userId);
+
+        allow update: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(logId) &&
+          (userId == request.auth.uid || isSuperAdminEmail()) &&
+          isValidLearningRecord(incoming()) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().loggedAt == existing().loggedAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['studentName', 'logData', 'updatedAt']) &&
+          isParentConfigAccessible(userId);
+
+        allow delete: if isSignedIn() && isVerified() && isValidId(userId) && isValidId(logId) &&
+          ((userId == request.auth.uid && existing().ownerId == request.auth.uid) || isSuperAdminEmail()) &&
+          isParentConfigAccessible(userId);
+      }
+    }
+  }
+}

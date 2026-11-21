@@ -1,0 +1,33 @@
+{
+  "id": "/",
+  "name": "UPSC MindGrid | मुख्य परीक्षा मूल्यांकन पोर्टल",
+  "short_name": "UPSC Portal",
+  "description": "UPSC मुख्य परीक्षा उत्तर-पुस्तिका मूल्यांकन एवं 4-स्तंभीय स्कोरकार्ड पोर्टल",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

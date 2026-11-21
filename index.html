@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        function isIgnorableRuntimeMessage(msg) {
+          if (!msg || typeof msg !== 'string') return false;
+          return (
+            msg.indexOf('WebSocket closed without opened') !== -1 ||
+            msg.indexOf('failed to connect to websocket') !== -1 ||
+            msg.indexOf('resource-exhausted') !== -1 ||
+            msg.indexOf('Quota limit exceeded') !== -1 ||
+            msg.indexOf('Using maximum backoff delay') !== -1
+          );
+        }
+
+        // Prevent @vite/client HMR WebSocket from firing 'WebSocket closed without opened' in Cloud Run preview
+        var OriginalWebSocket = window.WebSocket;
+        if (typeof OriginalWebSocket === 'function') {
+          var PatchedWebSocket = function (url, protocols) {
+            var isViteHmr =
+              protocols === 'vite-hmr' ||
+              protocols === 'vite-ping' ||
+              (Array.isArray(protocols) && (protocols.indexOf('vite-hmr') !== -1 || protocols.indexOf('vite-ping') !== -1)) ||
+              (typeof url === 'string' && url.indexOf('token=') !== -1 && url.indexOf('firestore') === -1);
+            if (isViteHmr) {
+              var dummyWs = {
+                url: url || '',
+                readyState: 1,
+                CONNECTING: 0,
+                OPEN: 1,
+                CLOSING: 2,
+                CLOSED: 3,
+                protocol: typeof protocols === 'string' ? protocols : 'vite-hmr',
+                extensions: '',
+                bufferedAmount: 0,
+                binaryType: 'blob',
+                send: function () {},
+                close: function () {},
+                addEventListener: function (type, listener) {
+                  if (type === 'open' && typeof listener === 'function') {
+                    setTimeout(function () {
+                      try { listener({ type: 'open', target: dummyWs }); } catch (e) {}
+                    }, 10);
+                  }
+                },
+                removeEventListener: function () {},
+                dispatchEvent: function () { return true; },
+                onopen: null,
+                onmessage: null,
+                onerror: null,
+                onclose: null
+              };
+              setTimeout(function () {
+                if (typeof dummyWs.onopen === 'function') {
+                  try { dummyWs.onopen({ type: 'open', target: dummyWs }); } catch (e) {}
+                }
+              }, 10);
+              return dummyWs;
+            }
+            return protocols !== undefined
+              ? new OriginalWebSocket(url, protocols)
+              : new OriginalWebSocket(url);
+          };
+          PatchedWebSocket.prototype = OriginalWebSocket.prototype;
+          PatchedWebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+          PatchedWebSocket.OPEN = OriginalWebSocket.OPEN;
+          PatchedWebSocket.CLOSING = OriginalWebSocket.CLOSING;
+          PatchedWebSocket.CLOSED = OriginalWebSocket.CLOSED;
+          window.WebSocket = PatchedWebSocket;
+        }
+
+        // Also filter console.error so [vite] Error: WebSocket closed without opened never triggers overlay
+        var origConsoleError = console.error;
+        console.error = function () {
+          try {
+            for (var i = 0; i < arguments.length; i++) {
+              var arg = arguments[i];
+              var str = typeof arg === 'string' ? arg : (arg && arg.message) || String(arg || '');
+              if (isIgnorableRuntimeMessage(str)) {
+                return;
+              }
+            }
+          } catch (e) {}
+          return origConsoleError.apply(console, arguments);
+        };
+
+        window.addEventListener('unhandledrejection', function (e) {
+          var msg = e && e.reason && (e.reason.message || String(e.reason));
+          if (isIgnorableRuntimeMessage(msg)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('error', function (e) {
+          var msg = (e && e.message) || (e && e.error && e.error.message) || '';
+          if (isIgnorableRuntimeMessage(msg)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
+    <title>UPSC Mains Portal | मुख्य परीक्षा मूल्यांकन पोर्टल</title>
+    <meta name="application-name" content="UPSC Portal" />
+    <meta name="description" content="UPSC मुख्य परीक्षा उत्तर-पुस्तिका मूल्यांकन एवं 4-स्तंभीय स्कोरकार्ड पोर्टल" />
+    <meta property="og:title" content="UPSC Mains Evaluation Portal | मुख्य परीक्षा मूल्यांकन पोर्टल" />
+    <meta property="og:description" content="अपनी हस्तलिखित उत्तर-पुस्तिका अपलोड करें और पाएं मानक लाल-पेन मूल्यांकन व विस्तृत स्कोरकार्ड।" />
+    <meta property="og:type" content="website" />
+
+    <!-- Standalone Progressive Web App (PWA) Meta & Icons -->
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="UPSC Portal" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+
+    <!-- PDF.js CDN library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Mukta:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@300;400;500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-50 text-slate-800">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Configure PDF.js worker URL
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      // Unregister any stale Service Workers that might intercept AI Studio auth tokens or /api calls
+      try {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function (registrations) {
+            for (var i = 0; i < registrations.length; i++) {
+              registrations[i].unregister();
+            }
+          }).catch(function () {});
+        }
+        if ('caches' in window) {
+          caches.keys().then(function (keys) {
+            for (var j = 0; j < keys.length; j++) {
+              if (keys[j].indexOf('workbox') !== -1 || keys[j].indexOf('precache') !== -1) {
+                caches.delete(keys[j]);
+              }
+            }
+          }).catch(function () {});
+        }
+      } catch (e) {}
+
+      // If page was loaded from a browser cache with __aistudio_auth_token still in URL,
+      // sync it with the backend proxy before cleaning the URL bar
+      try {
+        var searchStr = window.location.search || '';
+        if (searchStr.indexOf('__aistudio_auth_token') !== -1 || searchStr.indexOf('__storage_access_granted') !== -1) {
+          window.__AISTUDIO_INITIAL_AUTH_SEARCH = searchStr;
+          fetch('/api/health' + searchStr, { credentials: 'include', cache: 'no-store' })
+            .finally(function () {
+              try {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              } catch (err) {}
+            });
+        } else if (searchStr && !searchStr.includes('code=') && !searchStr.includes('state=')) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {}
+    </script>
+  </body>
+</html>

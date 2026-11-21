@@ -1,0 +1,417 @@
+{
+  "entities": {
+    "PlatformPolicy": {
+      "title": "PlatformPolicy",
+      "description": "Global EdTech platform settings controlled by the Owner/Super Admin.",
+      "type": "object",
+      "properties": {
+        "updatedBy": {
+          "type": "string",
+          "description": "UID of the admin who updated the policy.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "defaultStudentQuota": {
+          "type": "number",
+          "description": "Default evaluation quota assigned to new students."
+        },
+        "retentionDays": {
+          "type": "number",
+          "description": "Number of days student evaluation data is retained on the platform."
+        },
+        "allowStudentUploads": {
+          "type": "boolean",
+          "description": "Whether students are currently permitted to run evaluations."
+        },
+        "platformBanner": {
+          "type": "string",
+          "description": "Announcement or rule banner displayed to all logged-in students.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "instituteName": {
+          "type": "string",
+          "description": "Custom coaching or institute name displayed on downloaded PDFs, scorecards, and shared reports.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "instituteTagline": {
+          "type": "string",
+          "description": "Custom coaching tagline, website, or contact info displayed on downloaded PDFs and shared reports.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "maxPages10Marker": {
+          "type": "number",
+          "description": "Maximum pages allowed per copy for a 10-marker question (default 4)."
+        },
+        "maxPages15Marker": {
+          "type": "number",
+          "description": "Maximum pages allowed per copy for a 15-marker question (default 5)."
+        },
+        "ownerWhatsappNumber": {
+          "type": "string",
+          "description": "Optional WhatsApp number for student quota upgrade requests.",
+          "minLength": 0,
+          "maxLength": 30
+        },
+        "ownerUpiId": {
+          "type": "string",
+          "description": "Optional UPI ID for student quota upgrade payments.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "quotaPlanSummary": {
+          "type": "string",
+          "description": "Compact plan configuration string (e.g., 10:99,25:199,60:399).",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "paymentApprovalMode": {
+          "type": "string",
+          "enum": ["auto", "manual"],
+          "description": "Whether student UPI UTR submissions auto-approve quota immediately or wait for Owner 1-click approval."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": ["updatedBy", "defaultStudentQuota", "retentionDays", "allowStudentUploads", "platformBanner", "updatedAt"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Registered user/student profile with role, access status, evaluation quota, and usage count.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full name of the student or evaluator.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified email address of the user.",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "evaluator", "owner"],
+          "description": "Platform role of the user."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "blocked"],
+          "description": "Account access status."
+        },
+        "quotaLimit": {
+          "type": "number",
+          "description": "Maximum number of copies this student is allowed to evaluate."
+        },
+        "usedCount": {
+          "type": "number",
+          "description": "Number of copies evaluated by this student so far."
+        },
+        "joinedAt": {
+          "type": "string",
+          "description": "ISO date-time when the student joined.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last profile update."
+        }
+      },
+      "required": ["ownerId", "displayName", "email", "role", "status", "quotaLimit", "usedCount", "joinedAt", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin/evaluator role assignment document.",
+      "type": "object",
+      "properties": {
+        "adminUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["adminUid", "email", "grantedBy", "updatedAt"]
+    },
+    "UserSyncConfig": {
+      "title": "UserSyncConfig",
+      "description": "Stores cloud-synced prompt slots, active slot ID, AI model settings, rubric rules, and model answer presets.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the authenticated owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeSlotId": {
+          "type": "number",
+          "description": "Currently active system prompt slot ID (1 to 5)."
+        },
+        "promptSlots": {
+          "type": "object",
+          "description": "Map of the 5 system prompt slots (slot_1 through slot_5)."
+        },
+        "modelSettings": {
+          "type": "object",
+          "description": "Map of model cascade, strictness, rubric weights, presets, and evaluation preferences."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last sync."
+        }
+      },
+      "required": ["ownerId", "activeSlotId", "promptSlots", "modelSettings", "updatedAt"]
+    },
+    "EvaluationRecord": {
+      "title": "EvaluationRecord",
+      "description": "Stores a single evaluated UPSC Mains copy scorecard, 4-pillar rubric breakdown, and red-pen margin annotations.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the user who owns this evaluation record.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "description": "Name of the student whose copy was evaluated.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject or paper name (e.g., GS-1, GS-2, Essay).",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "obtainedMarks": {
+          "type": "number",
+          "description": "Total marks obtained by the student."
+        },
+        "maxMarks": {
+          "type": "number",
+          "description": "Maximum marks for the question/copy."
+        },
+        "evalData": {
+          "type": "object",
+          "description": "Structured evaluation result map including rubric_breakdown, question_analysis, word_count, and page annotations."
+        },
+        "evaluatedAt": {
+          "type": "string",
+          "description": "ISO timestamp string when the evaluation was completed.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last record update."
+        }
+      },
+      "required": ["ownerId", "studentName", "subject", "obtainedMarks", "maxMarks", "evalData", "evaluatedAt", "updatedAt"]
+    },
+    "LearningRecord": {
+      "title": "LearningRecord",
+      "description": "Stores human evaluator corrections over AI evaluations for pattern analysis and prompt training.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the evaluator who logged this correction.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "description": "Student name associated with the corrected copy.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "logData": {
+          "type": "object",
+          "description": "Structured diff map containing originalEval and correctedEval."
+        },
+        "loggedAt": {
+          "type": "string",
+          "description": "ISO timestamp string when the learning log was created.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": ["ownerId", "studentName", "logData", "loggedAt", "updatedAt"]
+    },
+    "QuotaUpgradeRequest": {
+      "title": "QuotaUpgradeRequest",
+      "description": "Stores a student UPI payment and 12-digit UTR quota upgrade request for Auto-Verification or Owner 1-Click Approval.",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "studentEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "planTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "copiesRequested": {
+          "type": "number"
+        },
+        "amountInr": {
+          "type": "number"
+        },
+        "utrNumber": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "auto_approved", "approved", "rejected"]
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["requestId", "ownerId", "studentName", "studentEmail", "planTitle", "copiesRequested", "amountInr", "utrNumber", "status", "createdAt", "updatedAt"]
+    },
+    "FeedbackReport": {
+      "title": "FeedbackReport",
+      "description": "Stores user feedback on evaluation suggestions ({evaluationId, section, note}).",
+      "type": "object",
+      "properties": {
+        "evaluationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "note": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["evaluationId", "section", "ownerId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/platform_settings/{configId}": {
+      "schema": { "$ref": "#/entities/PlatformPolicy" },
+      "description": "Global platform rules, default student quota, and retention policy managed by the Owner."
+    },
+    "/student_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/StudentProfile" },
+      "description": "Registered student and evaluator profiles managed by the Owner."
+    },
+    "/quota_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/QuotaUpgradeRequest" },
+      "description": "Student UPI payment and UTR quota upgrade requests."
+    },
+    "/feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/FeedbackReport" },
+      "description": "User-submitted feedback reports on evaluation sections."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted admin role registry managed by the Super Admin."
+    },
+    "/user_configs/{userId}": {
+      "schema": { "$ref": "#/entities/UserSyncConfig" },
+      "description": "Per-user cloud configuration document storing prompt slots, model settings, and presets."
+    },
+    "/user_configs/{userId}/evaluations/{evalId}": {
+      "schema": { "$ref": "#/entities/EvaluationRecord" },
+      "description": "Subcollection of evaluated student copy scorecards and annotations belonging to the user."
+    },
+    "/user_configs/{userId}/learning_logs/{logId}": {
+      "schema": { "$ref": "#/entities/LearningRecord" },
+      "description": "Subcollection of AI learning database correction logs belonging to the user."
+    }
+  }
+}
