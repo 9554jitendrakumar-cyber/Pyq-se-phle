@@ -13,6 +13,11 @@ export interface Annotation {
   is_bold?: boolean; // Bold text toggle (default true)
   is_italic?: boolean; // Italic text toggle (default false)
   is_underline?: boolean; // Underlined text toggle (default false)
+  anchor_x_percent?: number; // Target handwriting edge X% for arrow tip
+  anchor_y_percent?: number; // Target handwriting row center Y% for arrow tip
+  arrow_style?: 'auto' | 'curved' | 'straight' | 'elbow' | 'none'; // Connector arrow style
+  placement_zone?: 'left_margin' | 'right_margin' | 'gap' | 'bottom' | 'top' | 'virtual_margin';
+  is_custom_anchor?: boolean; // True if reviewer manually adjusted arrow tip
 }
 
 export interface WordCountBreakdown {

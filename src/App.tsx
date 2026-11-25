@@ -118,6 +118,16 @@ import {
   computeDynamicAnnotationPlacement
 } from './utils/annotationSanitizer';
 import {
+  analyzePageImage,
+  getCachedPageAnalysis,
+  type PageGeometryAnalysis
+} from './utils/pageWhitespaceAnalyzer';
+import { computeSmartPageLayout } from './utils/smartAnnotationLayout';
+import {
+  SmartRedPenOverlay,
+  HandDrawnMarksCircle
+} from './components/SmartRedPenOverlay';
+import {
   auth,
   onAuthStateChanged,
   signInWithGoogle,
@@ -393,6 +403,52 @@ export default function App() {
     const saved = localStorage.getItem('upsc_annotation_font');
     return saved === 'mukta' ? 'mukta' : 'kalam';
   });
+  const [smartLayoutEnabled, setSmartLayoutEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('upsc_smart_annotation_layout');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+  const [pageGeometryMap, setPageGeometryMap] = useState<Record<string, PageGeometryAnalysis>>({});
+
+  const toggleSmartLayoutMode = (enabled: boolean) => {
+    setSmartLayoutEnabled(enabled);
+    try {
+      localStorage.setItem('upsc_smart_annotation_layout', String(enabled));
+    } catch {}
+  };
+
+  // Autonomous background 2D whitespace & ink-edge scanner for every uploaded copy page (~15ms/page, cached)
+  useEffect(() => {
+    if (!smartLayoutEnabled || uploadedPages.length === 0) return;
+    let cancelled = false;
+
+    const missingPages = uploadedPages.filter((p) => p?.id && !pageGeometryMap[p.id]);
+    if (missingPages.length === 0) return;
+
+    Promise.all(
+      missingPages.map(async (page) => {
+        const analysis = await analyzePageImage(page.dataUrl, page.id);
+        return [page.id, analysis] as const;
+      })
+    ).then((entries) => {
+      if (cancelled || entries.length === 0) return;
+      setPageGeometryMap((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const [id, analysis] of entries) {
+          if (!next[id]) {
+            next[id] = analysis;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uploadedPages, smartLayoutEnabled, pageGeometryMap]);
   const [defaultAnnotationFontScale, setDefaultAnnotationFontScale] = useState<number>(() => {
     const saved = localStorage.getItem('upsc_default_annotation_font_scale');
     const parsed = saved ? parseFloat(saved) : 1.0;
@@ -2739,7 +2795,10 @@ export default function App() {
 
   const [draggingAnnId, setDraggingAnnId] = useState<string | null>(null);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, ann: Annotation & { _adjustedY?: number }) => {
+  const handlePointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    ann: Annotation & { _adjustedY?: number; _adjustedX?: number }
+  ) => {
     // Students cannot drag or reposition evaluator annotations
     if (isEffectiveStudentView || !isOwnerAccount) {
       return;
@@ -2755,7 +2814,7 @@ export default function App() {
 
     const startX = e.clientX;
     const startY = e.clientY;
-    const startAnnX = ann.x_percent;
+    const startAnnX = typeof ann._adjustedX === 'number' ? ann._adjustedX : ann.x_percent;
     const startAnnY = typeof ann._adjustedY === 'number' ? ann._adjustedY : ann.y_percent;
 
     const container = (e.currentTarget.closest('.page-canvas-container') as HTMLElement) || canvasContainerRef.current;
@@ -3797,6 +3856,7 @@ export default function App() {
       targetStudentName,
       targetOriginalFileName,
       annotationFont: targetResult?.annotation_font || annotationFont,
+      smartLayoutEnabled,
       branding: platformPolicy,
       onProgress,
       showToast,
@@ -4333,6 +4393,20 @@ export default function App() {
                   >
                     <FileText className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">{zenShowCommentsPanel ? 'टिप्पणियां: खुली' : 'टिप्पणियां: बंद'}</span>
+                  </button>
+
+                  {/* Toggle Smart Placement & Human Arrows in Zen Mode */}
+                  <button
+                    type="button"
+                    onClick={() => toggleSmartLayoutMode(!smartLayoutEnabled)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                      smartLayoutEnabled
+                        ? 'bg-rose-600/90 hover:bg-rose-500 text-white border-rose-400 shadow-sm'
+                        : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    }`}
+                    title={smartLayoutEnabled ? 'स्मार्ट प्लेसमेंट एवं लाल तीर चालू हैं (क्लासिक पर स्विच करने के लिए क्लिक करें)' : 'क्लासिक मार्जिन मोड (स्मार्ट प्लेसमेंट एवं तीर चालू करने के लिए क्लिक करें)'}
+                  >
+                    <span>{smartLayoutEnabled ? '🏹 स्मार्ट तीर' : '📐 क्लासिक'}</span>
                   </button>
 
                   {uploadedPages.length > 1 && (
@@ -5070,112 +5144,202 @@ export default function App() {
                             const pageIdx = pageNum - 1;
                             const pageData = uploadedPages[pageIdx];
                             const pageAnnotations: Annotation[] = evalResult?.pages.find((p) => p.page_number === pageNum)?.annotations || [];
+                            const effectiveBaseScale = evalResult?.default_font_scale || defaultAnnotationFontScale || 1.0;
+                            const effectiveCanvasFont = evalResult?.annotation_font || annotationFont;
 
-                            // Dynamic Height-Aware Margin Placement & Anti-Overlap Engine
-                            const finalRenderAnns = computeDynamicAnnotationPlacement<Annotation>(pageAnnotations, {
-                              maxBottomPercent: 86.5,
-                              defaultFontScale: evalResult?.default_font_scale || defaultAnnotationFontScale || 1.0
-                            });
+                            // Compute Smart Autonomous Layout (2D Ink Whitespace + Human Arrows + Auto Virtual Margin)
+                            const pageAnalysis = pageData
+                              ? pageGeometryMap[pageData.id] || getCachedPageAnalysis(pageData.id)
+                              : undefined;
+                            const smartLayout = smartLayoutEnabled
+                              ? computeSmartPageLayout<Annotation>(pageAnnotations, {
+                                  analysis: pageAnalysis,
+                                  pageNum,
+                                  totalPages: uploadedPages.length,
+                                  defaultFontScale: effectiveBaseScale,
+                                  evalResult,
+                                  includeLastPageSummary: true
+                                })
+                              : null;
+
+                            // Classic Fallback Placement Engine (used only when smartLayoutEnabled is false)
+                            const classicRenderAnns = !smartLayoutEnabled
+                              ? computeDynamicAnnotationPlacement<Annotation>(pageAnnotations, {
+                                  maxBottomPercent: 86.5,
+                                  defaultFontScale: effectiveBaseScale
+                                })
+                              : [];
 
                             const targetWidth = isDualPageView 
                               ? `${490 * (zoomLevel / 100)}px` 
                               : `${560 * (zoomLevel / 100)}px`;
+
+                            const hasVirtualMargin = Boolean(
+                              smartLayout && (smartLayout.virtualMarginLeftPct > 0 || smartLayout.virtualMarginRightPct > 0)
+                            );
 
                             return (
                               <div 
                                 key={`canvas-p-${pageNum}-${isRightSide ? 'R' : 'L'}`}
                                 ref={isRightSide ? secondaryCanvasContainerRef : canvasContainerRef}
                                 onClick={(e) => handleMarginClick(e, pageNum)}
-                                className={`page-canvas-container relative bg-white border border-slate-300 shadow-md aspect-[1/1.414] select-none ${!isEffectiveStudentView && isOwnerAccount ? 'cursor-crosshair' : 'cursor-default'} overflow-hidden origin-top transition-all mx-auto`}
+                                className={`page-canvas-container relative border border-slate-300 shadow-md aspect-[1/1.414] select-none ${!isEffectiveStudentView && isOwnerAccount ? 'cursor-crosshair' : 'cursor-default'} overflow-hidden origin-top transition-all mx-auto`}
                                 style={{ 
                                   width: targetWidth,
                                   maxWidth: '100%',
-                                  containerType: 'inline-size'
+                                  containerType: 'inline-size',
+                                  backgroundColor: smartLayout ? smartLayout.paperBgHex : '#ffffff'
                                 }}
                               >
-                                {/* RENDER ACTUAL IMAGE OR HANDWRITTEN CSS RULED PAGE MOCKUP */}
-                                {pageData?.dataUrl.startsWith('MOCK_') ? (
-                                  <div className="absolute inset-0 pt-16 px-[16%] pb-10 flex flex-col font-serif pointer-events-none bg-white">
-                                    <div className="absolute inset-0 flex flex-col justify-between pt-16 pb-10 px-[15%] opacity-30 pointer-events-none">
-                                      {Array.from({ length: 28 }).map((_, i) => (
-                                        <div key={i} className="border-b border-sky-300 w-full h-0"></div>
-                                      ))}
-                                    </div>
+                                {/* RENDER ACTUAL IMAGE OR HANDWRITTEN CSS RULED PAGE MOCKUP (with seamless Virtual Margin if auto-enabled) */}
+                                <div
+                                  className="absolute top-0 bottom-0 pointer-events-none select-none"
+                                  style={{
+                                    left: smartLayout ? `${smartLayout.imageLeftPct}%` : '0%',
+                                    width: smartLayout ? `${smartLayout.imageWidthPct}%` : '100%',
+                                    borderLeft: hasVirtualMargin && (smartLayout?.virtualMarginLeftPct || 0) > 0 ? '1px solid rgba(148,163,184,0.28)' : undefined,
+                                    borderRight: hasVirtualMargin && (smartLayout?.virtualMarginRightPct || 0) > 0 ? '1px solid rgba(148,163,184,0.28)' : undefined
+                                  }}
+                                >
+                                  {pageData?.dataUrl.startsWith('MOCK_') ? (
+                                    <div className="absolute inset-0 pt-16 px-[16%] pb-10 flex flex-col font-serif pointer-events-none bg-white">
+                                      <div className="absolute inset-0 flex flex-col justify-between pt-16 pb-10 px-[15%] opacity-30 pointer-events-none">
+                                        {Array.from({ length: 28 }).map((_, i) => (
+                                          <div key={i} className="border-b border-sky-300 w-full h-0"></div>
+                                        ))}
+                                      </div>
 
-                                    {pageNum === 1 ? (
-                                      <div className="relative z-10 space-y-5 text-xs text-blue-900 leading-6 pl-2">
-                                        <p className="font-bold text-sm text-slate-800 border-b border-slate-200 pb-1">
-                                          उत्तर १: विकेंद्रीकृत योजना का महत्व
-                                        </p>
-                                        <p>
-                                          विकेंद्रीकृत योजना का मुख्य उद्देश्य सत्ता का हस्तांतरण जमीनी स्तर पर करके जनता की भागीदारी को बढ़ाना है। हमारे देश में 73वें और 74वें संविधान संशोधन के द्वारा पंचायतों और नगरपालिकाओं को एक सुदृढ़ संवैधानिक ढांचा प्रदान किया गया।
-                                        </p>
-                                        <p className="font-bold text-slate-800">
-                                          प्रमुख वित्तीय एवं प्रशासनिक बाधाएं:
-                                        </p>
-                                        <p className="pl-3">
-                                          १. स्थानीय संस्थाओं के पास स्वतंत्र राजस्व जुटाने के स्रोतों का पूर्ण अभाव है, वे मुख्य रूप से राज्य सरकारों से मिलने वाले विवेकाधीन अनुदानों पर ही निर्भर रहती हैं।
-                                        </p>
-                                        <p className="pl-3">
-                                          २. योजना निर्माण में जमीनी आवश्यकताओं के बजाय ऊपर से थोपे गए नौकरशाही मॉडल को वरीयता दी जाती है, जिससे योजनाएं अप्रभावी साबित होती हैं।
-                                        </p>
-                                        <p className="pl-3">
-                                          ३. पंचायती स्तर पर तकनीकी मानव संसाधन और पर्याप्त अवसंरचना का घोर अभाव है, जिससे फंड लैप्स हो जाते हैं।
-                                        </p>
-                                      </div>
-                                    ) : (
-                                      <div className="relative z-10 space-y-5 text-xs text-blue-900 leading-6 pl-2">
-                                        <p className="font-bold text-slate-800">
-                                          {pageNum === uploadedPages.length ? 'निष्कर्ष व सुधारात्मक सुझाव:' : 'प्रशासनिक व नीतिगत सुधारात्मक सुझाव:'}
-                                        </p>
-                                        <p className="pl-3">
-                                          - <b>3Fs (Funds, Functions, Functionaries):</b> राज्य वित्त आयोग की सिफारिशों को समय पर पूर्णतः लागू किया जाए ताकि स्वायत्तता बढ़े।
-                                        </p>
-                                        <p className="pl-3">
-                                          - <b>नागरिक सशक्तिकरण:</b> ग्राम सभा की बैठकों को प्रशासनिक स्तर पर निर्णय लेने हेतु उत्तरदायी बनाकर सुशासन को धरातल पर उतारा जाए।
-                                        </p>
-                                        <p className="pl-3">
-                                          - <b>क्षमता निर्माण:</b> पंचायतों को डिजिटल रूप से साक्षर किया जाए और एक एकीकृत स्थानिक योजना मंच बनाया जाए।
-                                        </p>
-                                        <p className="italic mt-4 text-slate-600 border-t border-slate-100 pt-3">
-                                          निष्कर्षतः, यदि भारत को सुशासन की दिशा में आगे बढ़ना है तो विकेंद्रीकृत शासन को वास्तविक अधिकार सौंपने होंगे।
-                                        </p>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <img 
-                                    src={pageData?.dataUrl} 
-                                    alt={`Answer Copy Page ${pageNum}`} 
-                                    className="w-full h-full object-fill pointer-events-none select-none"
+                                      {pageNum === 1 ? (
+                                        <div className="relative z-10 space-y-5 text-xs text-blue-900 leading-6 pl-2">
+                                          <p className="font-bold text-sm text-slate-800 border-b border-slate-200 pb-1">
+                                            उत्तर १: विकेंद्रीकृत योजना का महत्व
+                                          </p>
+                                          <p>
+                                            विकेंद्रीकृत योजना का मुख्य उद्देश्य सत्ता का हस्तांतरण जमीनी स्तर पर करके जनता की भागीदारी को बढ़ाना है। हमारे देश में 73वें और 74वें संविधान संशोधन के द्वारा पंचायतों और नगरपालिकाओं को एक सुदृढ़ संवैधानिक ढांचा प्रदान किया गया।
+                                          </p>
+                                          <p className="font-bold text-slate-800">
+                                            प्रमुख वित्तीय एवं प्रशासनिक बाधाएं:
+                                          </p>
+                                          <p className="pl-3">
+                                            १. स्थानीय संस्थाओं के पास स्वतंत्र राजस्व जुटाने के स्रोतों का पूर्ण अभाव है, वे मुख्य रूप से राज्य सरकारों से मिलने वाले विवेकाधीन अनुदानों पर ही निर्भर रहती हैं।
+                                          </p>
+                                          <p className="pl-3">
+                                            २. योजना निर्माण में जमीनी आवश्यकताओं के बजाय ऊपर से थोपे गए नौकरशाही मॉडल को वरीयता दी जाती है, जिससे योजनाएं अप्रभावी साबित होती हैं।
+                                          </p>
+                                          <p className="pl-3">
+                                            ३. पंचायती स्तर पर तकनीकी मानव संसाधन और पर्याप्त अवसंरचना का घोर अभाव है, जिससे फंड लैप्स हो जाते हैं।
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        <div className="relative z-10 space-y-5 text-xs text-blue-900 leading-6 pl-2">
+                                          <p className="font-bold text-slate-800">
+                                            {pageNum === uploadedPages.length ? 'निष्कर्ष व सुधारात्मक सुझाव:' : 'प्रशासनिक व नीतिगत सुधारात्मक सुझाव:'}
+                                          </p>
+                                          <p className="pl-3">
+                                            - <b>3Fs (Funds, Functions, Functionaries):</b> राज्य वित्त आयोग की सिफारिशों को समय पर पूर्णतः लागू किया जाए ताकि स्वायत्तता बढ़े।
+                                          </p>
+                                          <p className="pl-3">
+                                            - <b>नागरिक सशक्तिकरण:</b> ग्राम सभा की बैठकों को प्रशासनिक स्तर पर निर्णय लेने हेतु उत्तरदायी बनाकर सुशासन को धरातल पर उतारा जाए।
+                                          </p>
+                                          <p className="pl-3">
+                                            - <b>क्षमता निर्माण:</b> पंचायतों को डिजिटल रूप से साक्षर किया जाए और एक एकीकृत स्थानिक योजना मंच बनाया जाए।
+                                          </p>
+                                          <p className="italic mt-4 text-slate-600 border-t border-slate-100 pt-3">
+                                            निष्कर्षतः, यदि भारत को सुशासन की दिशा में आगे बढ़ना है तो विकेंद्रीकृत शासन को वास्तविक अधिकार सौंपने होंगे।
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <img 
+                                      src={pageData?.dataUrl} 
+                                      alt={`Answer Copy Page ${pageNum}`} 
+                                      className="w-full h-full object-fill pointer-events-none select-none"
+                                    />
+                                  )}
+                                </div>
+
+                                {/* RENDER HUMAN RED-PEN ARROWS, BADGES & LAST-PAGE EXAMINER SUMMARY */}
+                                {smartLayout && (
+                                  <SmartRedPenOverlay
+                                    layout={smartLayout}
+                                    highlightedAnnotationId={hoveredAnnotationId || selectedAnnotationId}
+                                    effectiveFont={effectiveCanvasFont}
                                   />
                                 )}
 
                                 {/* RENDER TOTAL MARKS CIRCLE ON FIRST PAGE */}
                                 {pageNum === 1 && evalResult && (
-                                  <div className="absolute top-3.5 right-3.5 z-30 flex items-center justify-center bg-white/95 border-[3px] border-red-600 rounded-full shadow-lg px-1.5" style={{ width: '13%', aspectRatio: '1/1', minWidth: '68px', maxWidth: '108px' }}>
-                                    <span className="text-red-600 font-extrabold font-sans text-center whitespace-nowrap leading-none" style={{ fontSize: 'clamp(12px, 1.85vw, 20px)' }}>
-                                      {evalResult.total_marks.obtained} / {evalResult.total_marks.max_marks}
-                                    </span>
-                                  </div>
+                                  smartLayout ? (
+                                    <HandDrawnMarksCircle
+                                      obtained={evalResult.total_marks.obtained}
+                                      maxMarks={evalResult.total_marks.max_marks}
+                                      inkColor={smartLayout.inkColor}
+                                    />
+                                  ) : (
+                                    <div className="absolute top-3.5 right-3.5 z-30 flex items-center justify-center bg-white/95 border-[3px] border-red-600 rounded-full shadow-lg px-1.5" style={{ width: '13%', aspectRatio: '1/1', minWidth: '68px', maxWidth: '108px' }}>
+                                      <span className="text-red-600 font-extrabold font-sans text-center whitespace-nowrap leading-none" style={{ fontSize: 'clamp(12px, 1.85vw, 20px)' }}>
+                                        {evalResult.total_marks.obtained} / {evalResult.total_marks.max_marks}
+                                      </span>
+                                    </div>
+                                  )
                                 )}
 
-                                {/* RENDER RED PEN MARGIN ANNOTATIONS */}
+                                {/* RENDER RED PEN ANNOTATIONS (Smart Autonomous Placement OR Classic Mode) */}
                                 <AnimatePresence>
-                                  {finalRenderAnns.map((ann) => {
+                                  {(smartLayout
+                                    ? smartLayout.placed.map((item) => ({
+                                        ...item.annotation,
+                                        isStamp: item.isStamp,
+                                        isLeft: item.isLeft,
+                                        _adjustedY: item.boxCenterY,
+                                        _adjustedX: item.boxX,
+                                        _smartBoxTopY: item.boxTopY,
+                                        _smartBoxWidth: item.boxWidth,
+                                        _smartRotationDeg: item.rotationDeg,
+                                        _smartInkColor: item.inkColor,
+                                        _smartBadgeSymbol:
+                                          item.connector.mode === 'badge' ? item.connector.badgeSymbol : undefined,
+                                        _isDimPhoto: smartLayout.isDimPhoto
+                                      }))
+                                    : classicRenderAnns.map((ann) => ({
+                                        ...ann,
+                                        _adjustedX: ann.x_percent,
+                                        _smartBoxTopY: undefined as number | undefined,
+                                        _smartBoxWidth: undefined as number | undefined,
+                                        _smartRotationDeg: 0,
+                                        _smartInkColor: undefined as string | undefined,
+                                        _smartBadgeSymbol: undefined as string | undefined,
+                                        _isDimPhoto: false
+                                      }))
+                                  ).map((ann) => {
                                     const isLeft = ann.isLeft;
                                     const isDragging = draggingAnnId === ann.id;
                                     const isResizing = resizingAnnId === ann.id;
                                     const isSelected = selectedAnnotationId === ann.id && !ann.isStamp && !isEffectiveStudentView && isOwnerAccount;
-                                    const currentWidth = ann.width_percent || 13.5;
-                                    const effectiveCanvasFont = evalResult?.annotation_font || annotationFont;
+                                    const isSmartModeItem = Boolean(smartLayout && !ann.isStamp);
+                                    const currentWidth = isSmartModeItem && !isDragging && !ann.is_custom_positioned && ann._smartBoxWidth
+                                      ? ann._smartBoxWidth
+                                      : (ann.width_percent || 13.5);
                                     const leftPos = ann.isStamp
-                                      ? `${ann.x_percent}%`
+                                      ? `${ann._adjustedX}%`
                                       : isDragging || ann.is_custom_positioned
                                         ? `${Math.max(0.5, Math.min(99 - currentWidth, ann.x_percent))}%`
-                                        : isLeft
-                                          ? '0.5%'
-                                          : `${Math.max(50, 99 - currentWidth)}%`;
+                                        : isSmartModeItem
+                                          ? `${ann._adjustedX}%`
+                                          : isLeft
+                                            ? '0.5%'
+                                            : `${Math.max(50, 99 - currentWidth)}%`;
+                                    const topPos =
+                                      isDragging || ann.is_custom_positioned
+                                        ? `${ann.y_percent}%`
+                                        : isSmartModeItem && typeof ann._smartBoxTopY === 'number'
+                                          ? `${ann._smartBoxTopY}%`
+                                          : `${ann._adjustedY}%`;
+                                    const useTopAlignedTransform =
+                                      isSmartModeItem && !isDragging && !ann.is_custom_positioned && typeof ann._smartBoxTopY === 'number';
+                                    const displayAnnotationText =
+                                      ann._smartBadgeSymbol ? `${ann._smartBadgeSymbol} ${ann.text}` : ann.text;
 
                                     return (
                                       <motion.div
@@ -5188,6 +5352,8 @@ export default function App() {
                                         exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.16 } }}
                                         transition={{ duration: 0.22, ease: "easeOut" }}
                                         onPointerDown={(e) => handlePointerDown(e, ann)}
+                                        onMouseEnter={() => setHoveredAnnotationId(ann.id)}
+                                        onMouseLeave={() => setHoveredAnnotationId((prev) => (prev === ann.id ? null : prev))}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           if (!isEffectiveStudentView && isOwnerAccount) {
@@ -5200,15 +5366,19 @@ export default function App() {
                                         className={`annotation-active-container group absolute leading-tight ${!isEffectiveStudentView && isOwnerAccount ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} z-20 ${
                                           ann.isStamp
                                             ? 'border-none p-0 bg-transparent shadow-none text-indigo-700 font-black drop-shadow-md'
-                                            : 'p-0.5 rounded text-red-600 bg-transparent border border-transparent'
+                                            : 'p-0.5 rounded bg-transparent border border-transparent'
                                         }`}
                                         style={{
                                           left: leftPos,
-                                          top: isDragging || ann.is_custom_positioned ? `${ann.y_percent}%` : `${ann._adjustedY}%`,
-                                          transform: 'translateY(-50%)',
+                                          top: topPos,
+                                          transform: useTopAlignedTransform
+                                            ? `rotate(${ann._smartRotationDeg || 0}deg)`
+                                            : 'translateY(-50%)',
                                           width: ann.isStamp ? 'auto' : `${currentWidth}%`,
                                           maxWidth: ann.isStamp ? 'none' : '50%',
                                           minHeight: !ann.isStamp && ann.min_height_px ? `${ann.min_height_px}px` : undefined,
+                                          color: ann.isStamp ? undefined : (ann._smartInkColor || '#dc2626'),
+                                          mixBlendMode: !ann.isStamp && isSmartModeItem && !ann._isDimPhoto && !isSelected ? 'multiply' : 'normal',
                                           wordBreak: 'break-word',
                                           fontFamily: effectiveCanvasFont === 'mukta'
                                             ? "'Mukta', 'Noto Sans Devanagari', sans-serif"
@@ -5217,11 +5387,11 @@ export default function App() {
                                           fontStyle: !ann.isStamp && (ann.is_italic ?? defaultAnnotationFormat.is_italic) ? 'italic' : 'normal',
                                           textDecoration: !ann.isStamp && (ann.is_underline ?? defaultAnnotationFormat.is_underline) ? 'underline' : 'none',
                                           touchAction: 'none',
-                                          fontSize: ann.isStamp ? '4cqi' : `${1.75 * (ann.font_scale || evalResult.default_font_scale || defaultAnnotationFontScale || 1.0)}cqi`
+                                          fontSize: ann.isStamp ? '4cqi' : `${1.72 * (ann.font_scale || evalResult.default_font_scale || defaultAnnotationFontScale || 1.0)}cqi`
                                         }}
                                       >
                                         <div className="relative flex flex-col justify-start w-full h-full select-none">
-                                          <span>{ann.text}</span>
+                                          <span>{displayAnnotationText}</span>
                                         </div>
                                         
                                         {!ann.isStamp && !isSelected && (
@@ -5973,6 +6143,37 @@ export default function App() {
                           title="Zoom In"
                         >
                           <ZoomIn className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Smart Autonomous Placement & Human Arrows Mode Switcher */}
+                      <div
+                        className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs shadow-2xs"
+                        title="स्मार्ट स्वायत्त प्लेसमेंट एवं लाल तीर बनाम क्लासिक हाशिया मोड बदलें"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleSmartLayoutMode(true)}
+                          className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                            smartLayoutEnabled
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          <span>🏹</span>
+                          <span>स्मार्ट तीर</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleSmartLayoutMode(false)}
+                          className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                            !smartLayoutEnabled
+                              ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                          }`}
+                        >
+                          <span>📐</span>
+                          <span>क्लासिक</span>
                         </button>
                       </div>
 

@@ -5,6 +5,11 @@ import {
   isAnnotationStamp,
   normalizeFixedGlossaryTerms
 } from './annotationSanitizer';
+import { analyzeImageElement } from './pageWhitespaceAnalyzer';
+import {
+  computeSmartPageLayout,
+  getHandDrawnCirclePoints
+} from './smartAnnotationLayout';
 
 export type EvalTagLabel = 'सही' | 'आंशिक' | 'गलत' | 'अप्रासंगिक';
 export type EvalTagTone = 'green' | 'amber' | 'red';
@@ -1784,6 +1789,7 @@ export const exportEvaluationPagesToPDF = async (params: {
   targetStudentName: string;
   targetOriginalFileName?: string;
   annotationFont: 'kalam' | 'mukta';
+  smartLayoutEnabled?: boolean;
   branding?: { instituteName?: string; instituteTagline?: string } | null;
   onProgress?: (percent: number) => void;
   showToast: (msg: string) => void;
@@ -1795,6 +1801,7 @@ export const exportEvaluationPagesToPDF = async (params: {
     targetStudentName,
     targetOriginalFileName,
     annotationFont,
+    smartLayoutEnabled = true,
     branding,
     onProgress,
     showToast,
@@ -1851,37 +1858,6 @@ export const exportEvaluationPagesToPDF = async (params: {
       const ctx = canvas.getContext('2d', { alpha: false });
 
       if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, imgWidth, imgHeight);
-        ctx.drawImage(img, 0, 0, imgWidth, imgHeight);
-
-        if (pageNum === 1) {
-          const marksStr = `${targetResult.total_marks.obtained} / ${targetResult.total_marks.max_marks}`;
-          const baseRadius = Math.max(44, Math.round(imgWidth * 0.062));
-          const fontSize = Math.max(18, Math.floor(baseRadius * 0.44));
-          ctx.font = `900 ${fontSize}px sans-serif`;
-          const textWidth = ctx.measureText(marksStr).width;
-          const circleRadius = Math.max(baseRadius, Math.ceil(textWidth * 0.62) + 14);
-          const safeRightMargin = Math.max(28, Math.round(imgWidth * 0.028));
-          const circleX = imgWidth - circleRadius - safeRightMargin;
-          const circleY = circleRadius + Math.max(24, Math.round(imgWidth * 0.022));
-
-          ctx.beginPath();
-          ctx.arc(circleX, circleY, circleRadius, 0, 2 * Math.PI);
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
-          ctx.fill();
-          ctx.lineWidth = Math.max(2.5, imgWidth * 0.005);
-          ctx.strokeStyle = '#dc2626';
-          ctx.stroke();
-
-          ctx.font = `900 ${fontSize}px sans-serif`;
-          ctx.fillStyle = '#dc2626';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(marksStr, circleX, circleY, circleRadius * 1.75);
-          ctx.textAlign = 'left';
-        }
-
         const effectiveFont = targetResult.annotation_font || annotationFont;
         const fontSize = Math.max(15, Math.floor(imgWidth * 0.0175));
         if (typeof document !== 'undefined' && document.fonts?.load) {
@@ -1899,81 +1875,430 @@ export const exportEvaluationPagesToPDF = async (params: {
         const savedDefaultScale = savedDefaultScaleRaw ? parseFloat(savedDefaultScaleRaw) : 1.0;
         const baseScale = targetResult.default_font_scale || (Number.isFinite(savedDefaultScale) ? savedDefaultScale : 1.0);
 
-        const placedPdfAnns = computeDynamicAnnotationPlacement(annotations, {
-          maxBottomPercent: 85.5,
-          defaultFontScale: baseScale
-        });
+        const fontFamily = effectiveFont === 'mukta'
+          ? '"Mukta", "Noto Sans Devanagari", sans-serif'
+          : '"Kalam", "Noto Sans Devanagari", cursive, sans-serif';
 
-        placedPdfAnns.forEach((ann) => {
-          const isStamp = ann.isStamp || isAnnotationStamp(ann.text);
-          const isLeft = ann.isLeft;
-          const effectiveYPercent = ann._adjustedY;
+        if (smartLayoutEnabled) {
+          const analysis = analyzeImageElement(img);
+          const smartLayout = computeSmartPageLayout(annotations, {
+            analysis,
+            pageNum,
+            totalPages,
+            defaultFontScale: baseScale,
+            evalResult: targetResult,
+            includeLastPageSummary: true
+          });
 
-          const yPos = (effectiveYPercent / 100) * imgHeight;
-          const widthNum = ann.width_percent || 13.5;
-          const customWidthPercent = widthNum / 100;
-          const maxWidth = imgWidth * customWidthPercent;
+          // Fill paper-matched background (handles seamless Auto Virtual Margin if needed)
+          ctx.fillStyle = smartLayout.paperBgHex || '#ffffff';
+          ctx.fillRect(0, 0, imgWidth, imgHeight);
 
-          const xPos = isStamp
-            ? (ann.x_percent / 100) * imgWidth
-            : ann.is_custom_positioned
-              ? (Math.max(0.5, Math.min(99 - widthNum, ann.x_percent)) / 100) * imgWidth
-              : isLeft
-                ? imgWidth * 0.004
-                : Math.max(imgWidth * 0.5, (imgWidth * 0.994) - maxWidth);
+          const drawImgX = (smartLayout.imageLeftPct / 100) * imgWidth;
+          const drawImgW = (smartLayout.imageWidthPct / 100) * imgWidth;
+          ctx.drawImage(img, drawImgX, 0, drawImgW, imgHeight);
 
-          if (isStamp) {
-            const stampFontSize = Math.max(26, Math.floor(imgWidth * 0.04));
-            ctx.font = `900 ${stampFontSize}px sans-serif`;
-            ctx.fillStyle = '#4338ca';
+          // Subtle paper fold seam if virtual margin was added
+          if (smartLayout.virtualMarginLeftPct > 0) {
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(drawImgX, 0);
+            ctx.lineTo(drawImgX, imgHeight);
+            ctx.stroke();
+          }
+          if (smartLayout.virtualMarginRightPct > 0) {
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(drawImgX + drawImgW, 0);
+            ctx.lineTo(drawImgX + drawImgW, imgHeight);
+            ctx.stroke();
+          }
+
+          // Hand-drawn red-pen Total Marks Circle on Page 1
+          if (pageNum === 1) {
+            const marksStr = `${targetResult.total_marks.obtained} / ${targetResult.total_marks.max_marks}`;
+            const baseRadius = Math.max(44, Math.round(imgWidth * 0.064));
+            const mFontSize = Math.max(20, Math.floor(baseRadius * 0.45));
+            ctx.font = `900 ${mFontSize}px ${fontFamily}`;
+            const textWidth = ctx.measureText(marksStr).width;
+            const circleRadius = Math.max(baseRadius, Math.ceil(textWidth * 0.62) + 14);
+            const safeRightMargin = Math.max(24, Math.round(imgWidth * 0.024));
+            const circleX = imgWidth - circleRadius - safeRightMargin;
+            const circleY = circleRadius + Math.max(20, Math.round(imgWidth * 0.02));
+
+            ctx.save();
+            ctx.translate(circleX, circleY);
+            ctx.rotate((-3.5 * Math.PI) / 180);
+
+            // Soft white backing inside circle for readability
+            ctx.beginPath();
+            ctx.arc(0, 0, circleRadius * 0.96, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fill();
+
+            // Organic hand-drawn double-loop pen stroke
+            const circlePts = getHandDrawnCirclePoints(0, 0, circleRadius, circleRadius * 0.97, 2.3);
+            if (circlePts.length > 1) {
+              ctx.beginPath();
+              ctx.moveTo(circlePts[0].x, circlePts[0].y);
+              for (let k = 1; k < circlePts.length; k++) {
+                ctx.lineTo(circlePts[k].x, circlePts[k].y);
+              }
+              ctx.lineWidth = Math.max(3.2, imgWidth * 0.0048);
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.strokeStyle = smartLayout.inkColor;
+              ctx.stroke();
+            }
+
+            ctx.font = `900 ${mFontSize}px ${fontFamily}`;
+            ctx.fillStyle = smartLayout.inkColor;
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(ann.text, xPos, yPos);
-          } else {
-            const fontFamily = effectiveFont === 'mukta'
-              ? '"Mukta", "Noto Sans Devanagari", sans-serif'
-              : '"Kalam", "Noto Sans Devanagari", cursive, sans-serif';
+            ctx.fillText(marksStr, 0, 1, circleRadius * 1.72);
+            ctx.restore();
+            ctx.textAlign = 'left';
+          }
 
-            const savedDefaultScaleRaw = typeof window !== 'undefined' ? localStorage.getItem('upsc_default_annotation_font_scale') : null;
-            const savedDefaultScale = savedDefaultScaleRaw ? parseFloat(savedDefaultScaleRaw) : 1.0;
-            const fontScale = ann.font_scale || targetResult.default_font_scale || (Number.isFinite(savedDefaultScale) ? savedDefaultScale : 1.0);
+          // Draw organic red-pen connector arrows & circled callout badges first
+          ctx.save();
+          if (!smartLayout.isDimPhoto) {
+            ctx.globalCompositeOperation = 'multiply';
+          }
+          for (const item of smartLayout.placed) {
+            const { connector, inkColor } = item;
+            if (connector.mode === 'none') continue;
+
+            if (connector.mode === 'badge' && connector.badgeSymbol) {
+              const bx = (connector.tx / 100) * imgWidth;
+              const by = (connector.ty / 100) * imgHeight;
+              const br = Math.max(14, imgWidth * 0.017);
+              ctx.save();
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.beginPath();
+              ctx.arc(bx, by, br, 0, Math.PI * 2);
+              ctx.fillStyle = 'rgba(255,255,255,0.92)';
+              ctx.fill();
+              ctx.lineWidth = Math.max(2.2, imgWidth * 0.0028);
+              ctx.strokeStyle = inkColor;
+              ctx.stroke();
+
+              const numLabel = connector.badgeSymbol.replace(/[①②③④⑤⑥⑦⑧]/g, (ch) =>
+                String('①②③④⑤⑥⑦⑧'.indexOf(ch) + 1)
+              );
+              ctx.font = `800 ${Math.round(br * 1.25)}px "Noto Sans Devanagari", sans-serif`;
+              ctx.fillStyle = inkColor;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(numLabel, bx, by + 1);
+              ctx.restore();
+              continue;
+            }
+
+            if (connector.mode === 'arrow') {
+              const sx = (connector.sx / 100) * imgWidth;
+              const sy = (connector.sy / 100) * imgHeight;
+              const cx = (connector.cx / 100) * imgWidth;
+              const cy = (connector.cy / 100) * imgHeight;
+              const tx = (connector.tx / 100) * imgWidth;
+              const ty = (connector.ty / 100) * imgHeight;
+              const hlx = (connector.headLeftX / 100) * imgWidth;
+              const hly = (connector.headLeftY / 100) * imgHeight;
+              const hrx = (connector.headRightX / 100) * imgWidth;
+              const hry = (connector.headRightY / 100) * imgHeight;
+
+              if (smartLayout.isDimPhoto) {
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.quadraticCurveTo(cx, cy, tx, ty);
+                ctx.strokeStyle = 'rgba(255,255,255,0.58)';
+                ctx.lineWidth = Math.max(5.8, imgWidth * 0.0072);
+                ctx.lineCap = 'round';
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(hlx, hly);
+                ctx.lineTo(tx, ty);
+                ctx.lineTo(hrx, hry);
+                ctx.strokeStyle = 'rgba(255,255,255,0.58)';
+                ctx.lineWidth = Math.max(6.0, imgWidth * 0.0075);
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+              }
+
+              ctx.beginPath();
+              ctx.moveTo(sx, sy);
+              ctx.quadraticCurveTo(cx, cy, tx, ty);
+              ctx.strokeStyle = inkColor;
+              ctx.lineWidth = Math.max(3.4, imgWidth * 0.0043);
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.stroke();
+
+              ctx.beginPath();
+              ctx.moveTo(hlx, hly);
+              ctx.lineTo(tx, ty);
+              ctx.lineTo(hrx, hry);
+              ctx.strokeStyle = inkColor;
+              ctx.lineWidth = Math.max(3.6, imgWidth * 0.0046);
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+
+          // Draw annotations in their smart-placed positions with subtle hand-tilt
+          for (const item of smartLayout.placed) {
+            const ann = item.annotation;
+            const xPos = (item.boxX / 100) * imgWidth;
+            const topYPos = (item.boxTopY / 100) * imgHeight;
+            const maxWidth = (item.boxWidth / 100) * imgWidth;
+
+            if (item.isStamp) {
+              const stampFontSize = Math.max(26, Math.floor(imgWidth * 0.04));
+              ctx.font = `900 ${stampFontSize}px sans-serif`;
+              ctx.fillStyle = '#4338ca';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(ann.text, xPos, (item.boxCenterY / 100) * imgHeight);
+              continue;
+            }
+
+            const fontScale = ann.font_scale || baseScale;
             const effectiveFontSize = Math.round(fontSize * fontScale);
             const isBold = ann.is_bold !== undefined ? ann.is_bold : true;
             const isItalic = Boolean(ann.is_italic);
             const isUnderline = Boolean(ann.is_underline);
             const fontStylePrefix = `${isItalic ? 'italic ' : ''}${isBold ? 'bold ' : '400 '}`;
-            ctx.font = `${fontStylePrefix}${effectiveFontSize}px ${fontFamily}`;
-            ctx.fillStyle = '#b91c1c';
-            ctx.textBaseline = 'middle';
+            const displayText =
+              item.connector.mode === 'badge' && item.connector.badgeSymbol
+                ? `${item.connector.badgeSymbol} ${ann.text}`
+                : ann.text;
 
-            const drawTextLineWithOptionalUnderline = (lineText: string, drawX: number, drawY: number) => {
+            ctx.save();
+            const centerX = xPos + maxWidth / 2;
+            const centerY = topYPos + ((item.boxHeight / 100) * imgHeight) / 2;
+            ctx.translate(centerX, centerY);
+            ctx.rotate((item.rotationDeg * Math.PI) / 180);
+            ctx.translate(-centerX, -centerY);
+
+            if (!smartLayout.isDimPhoto) {
+              ctx.globalCompositeOperation = 'multiply';
+            }
+
+            ctx.font = `${fontStylePrefix}${effectiveFontSize}px ${fontFamily}`;
+            ctx.fillStyle = item.inkColor;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const drawLine = (lineText: string, drawX: number, drawY: number) => {
               const trimmedLine = lineText.trimEnd();
               ctx.fillText(lineText, drawX, drawY);
               if (isUnderline && trimmedLine.length > 0) {
                 const lineW = ctx.measureText(trimmedLine).width;
                 const underlineThickness = Math.max(1.5, Math.round(effectiveFontSize * 0.065));
-                ctx.fillRect(drawX, drawY + effectiveFontSize * 0.44, lineW, underlineThickness);
+                ctx.fillRect(drawX, drawY + effectiveFontSize * 0.92, lineW, underlineThickness);
               }
             };
 
-            const words = ann.text.split(' ');
+            const words = displayText.split(' ');
             let line = '';
-            let currentY = yPos;
-            const lineHeight = effectiveFontSize * 1.32;
+            let currentY = topYPos + 2;
+            const lineHeight = effectiveFontSize * 1.28;
 
             for (let n = 0; n < words.length; n++) {
               const testLine = line + words[n] + ' ';
               const metrics = ctx.measureText(testLine);
               if (metrics.width > maxWidth && n > 0) {
-                drawTextLineWithOptionalUnderline(line, xPos, currentY);
+                drawLine(line, xPos, currentY);
                 line = words[n] + ' ';
                 currentY += lineHeight;
               } else {
                 line = testLine;
               }
             }
-            drawTextLineWithOptionalUnderline(line, xPos, currentY);
+            if (line.trim().length > 0) {
+              drawLine(line, xPos, currentY);
+            }
+            ctx.restore();
           }
-        });
+
+          // Automatic Last-Page Examiner Summary Box (in natural bottom whitespace)
+          if (smartLayout.examinerSummary) {
+            const sum = smartLayout.examinerSummary;
+            const sx = (sum.x / 100) * imgWidth;
+            const sy = (sum.y / 100) * imgHeight;
+            const sw = (sum.width / 100) * imgWidth;
+            const sumFontSize = Math.max(17, Math.floor(imgWidth * 0.0185));
+
+            ctx.save();
+            if (!smartLayout.isDimPhoto) {
+              ctx.globalCompositeOperation = 'multiply';
+            }
+            // Hand-drawn dashed red top separator line
+            ctx.strokeStyle = sum.inkColor;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 6]);
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + sw, sy);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = sum.inkColor;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            const wrapSummaryText = (
+              text: string,
+              startY: number,
+              fSize: number,
+              weight: string
+            ): number => {
+              ctx.font = `${weight} ${fSize}px ${fontFamily}`;
+              const words = text.split(' ');
+              let line = '';
+              let cy = startY;
+              const lh = fSize * 1.32;
+              for (let n = 0; n < words.length; n++) {
+                const test = line + words[n] + ' ';
+                if (ctx.measureText(test).width > sw - 12 && n > 0) {
+                  ctx.fillText(line, sx + 6, cy);
+                  line = words[n] + ' ';
+                  cy += lh;
+                } else {
+                  line = test;
+                }
+              }
+              if (line.trim()) {
+                ctx.fillText(line, sx + 6, cy);
+                cy += lh;
+              }
+              return cy;
+            };
+
+            let nextY = wrapSummaryText(
+              `★ अगली कॉपी का #1 फोकस: ${sum.focusLine}`,
+              sy + 10,
+              sumFontSize,
+              'bold'
+            );
+            if (sum.strengthLine) {
+              wrapSummaryText(
+                `✓ सबल पक्ष: ${sum.strengthLine}`,
+                nextY + 4,
+                Math.round(sumFontSize * 0.9),
+                '600'
+              );
+            }
+            ctx.restore();
+          }
+        } else {
+          // CLASSIC MODE RENDERING (100% preserved fallback)
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, imgWidth, imgHeight);
+          ctx.drawImage(img, 0, 0, imgWidth, imgHeight);
+
+          if (pageNum === 1) {
+            const marksStr = `${targetResult.total_marks.obtained} / ${targetResult.total_marks.max_marks}`;
+            const baseRadius = Math.max(44, Math.round(imgWidth * 0.062));
+            const mFontSize = Math.max(18, Math.floor(baseRadius * 0.44));
+            ctx.font = `900 ${mFontSize}px sans-serif`;
+            const textWidth = ctx.measureText(marksStr).width;
+            const circleRadius = Math.max(baseRadius, Math.ceil(textWidth * 0.62) + 14);
+            const safeRightMargin = Math.max(28, Math.round(imgWidth * 0.028));
+            const circleX = imgWidth - circleRadius - safeRightMargin;
+            const circleY = circleRadius + Math.max(24, Math.round(imgWidth * 0.022));
+
+            ctx.beginPath();
+            ctx.arc(circleX, circleY, circleRadius, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+            ctx.fill();
+            ctx.lineWidth = Math.max(2.5, imgWidth * 0.005);
+            ctx.strokeStyle = '#dc2626';
+            ctx.stroke();
+
+            ctx.font = `900 ${mFontSize}px sans-serif`;
+            ctx.fillStyle = '#dc2626';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(marksStr, circleX, circleY, circleRadius * 1.75);
+            ctx.textAlign = 'left';
+          }
+
+          const placedPdfAnns = computeDynamicAnnotationPlacement(annotations, {
+            maxBottomPercent: 85.5,
+            defaultFontScale: baseScale
+          });
+
+          placedPdfAnns.forEach((ann) => {
+            const isStamp = ann.isStamp || isAnnotationStamp(ann.text);
+            const isLeft = ann.isLeft;
+            const effectiveYPercent = ann._adjustedY;
+
+            const yPos = (effectiveYPercent / 100) * imgHeight;
+            const widthNum = ann.width_percent || 13.5;
+            const customWidthPercent = widthNum / 100;
+            const maxWidth = imgWidth * customWidthPercent;
+
+            const xPos = isStamp
+              ? (ann.x_percent / 100) * imgWidth
+              : ann.is_custom_positioned
+                ? (Math.max(0.5, Math.min(99 - widthNum, ann.x_percent)) / 100) * imgWidth
+                : isLeft
+                  ? imgWidth * 0.004
+                  : Math.max(imgWidth * 0.5, (imgWidth * 0.994) - maxWidth);
+
+            if (isStamp) {
+              const stampFontSize = Math.max(26, Math.floor(imgWidth * 0.04));
+              ctx.font = `900 ${stampFontSize}px sans-serif`;
+              ctx.fillStyle = '#4338ca';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(ann.text, xPos, yPos);
+            } else {
+              const fontScale = ann.font_scale || baseScale;
+              const effectiveFontSize = Math.round(fontSize * fontScale);
+              const isBold = ann.is_bold !== undefined ? ann.is_bold : true;
+              const isItalic = Boolean(ann.is_italic);
+              const isUnderline = Boolean(ann.is_underline);
+              const fontStylePrefix = `${isItalic ? 'italic ' : ''}${isBold ? 'bold ' : '400 '}`;
+              ctx.font = `${fontStylePrefix}${effectiveFontSize}px ${fontFamily}`;
+              ctx.fillStyle = '#b91c1c';
+              ctx.textBaseline = 'middle';
+
+              const drawTextLineWithOptionalUnderline = (lineText: string, drawX: number, drawY: number) => {
+                const trimmedLine = lineText.trimEnd();
+                ctx.fillText(lineText, drawX, drawY);
+                if (isUnderline && trimmedLine.length > 0) {
+                  const lineW = ctx.measureText(trimmedLine).width;
+                  const underlineThickness = Math.max(1.5, Math.round(effectiveFontSize * 0.065));
+                  ctx.fillRect(drawX, drawY + effectiveFontSize * 0.44, lineW, underlineThickness);
+                }
+              };
+
+              const words = ann.text.split(' ');
+              let line = '';
+              let currentY = yPos;
+              const lineHeight = effectiveFontSize * 1.32;
+
+              for (let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                const metrics = ctx.measureText(testLine);
+                if (metrics.width > maxWidth && n > 0) {
+                  drawTextLineWithOptionalUnderline(line, xPos, currentY);
+                  line = words[n] + ' ';
+                  currentY += lineHeight;
+                } else {
+                  line = testLine;
+                }
+              }
+              drawTextLineWithOptionalUnderline(line, xPos, currentY);
+            }
+          });
+        }
 
         // Keep the copy margin-annotation page rendering unchanged
         const sheetBrandName =

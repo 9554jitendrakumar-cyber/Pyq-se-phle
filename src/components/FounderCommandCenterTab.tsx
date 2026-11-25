@@ -20,12 +20,17 @@ import {
   HelpCircle,
   Check,
   Zap,
+  Lock,
+  Users,
+  ExternalLink,
 } from 'lucide-react';
 import localforage from 'localforage';
 import {
   StudentProfileData,
   PlatformPolicyConfig,
   QuotaUpgradeRequestData,
+  SUPER_ADMIN_EMAILS,
+  getFirebaseSystemInfo,
   getFirestoreFirewallStats,
   resetFirestoreWriteFirewall,
   savePlatformPolicy,
@@ -74,7 +79,21 @@ export const FounderCommandCenterTab: React.FC<FounderCommandCenterTabProps> = (
   const [isResettingPrompt, setIsResettingPrompt] = useState<boolean>(false);
   const [isRestoringBackup, setIsRestoringBackup] = useState<boolean>(false);
   const [activeGuideSection, setActiveGuideSection] = useState<string>('architecture');
+  const [copiedSysKey, setCopiedSysKey] = useState<string | null>(null);
+  const [showCollectionsMatrix, setShowCollectionsMatrix] = useState<boolean>(false);
   const backupFileInputRef = useRef<HTMLInputElement | null>(null);
+  const firebaseSystemInfo = getFirebaseSystemInfo();
+
+  const handleCopySysValue = (key: string, value: string, label: string) => {
+    try {
+      navigator.clipboard.writeText(value);
+      setCopiedSysKey(key);
+      showToast(`✓ ${label} कॉपी हो गया!`);
+      setTimeout(() => setCopiedSysKey(null), 2000);
+    } catch {
+      showToast('कॉपी करने में समस्या आई।');
+    }
+  };
 
   const refreshSystemMetrics = async () => {
     setFirewallStats(getFirestoreFirewallStats());
@@ -969,6 +988,210 @@ export const FounderCommandCenterTab: React.FC<FounderCommandCenterTabProps> = (
         </div>
       </div>
 
+      {/* 2B. Co-Owner Security Governance & Firebase Infrastructure Registry */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700 pb-3">
+          <div>
+            <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+              <Lock className="w-4 h-4 text-emerald-600" />
+              <span>को-ओनर सुरक्षा अधिकार एवं Firebase सिस्टम जानकारी (Owner Governance Center)</span>
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              दोनों अधिकृत ओनर्स के समान अधिकार, क्लाउड डेटाबेस पहचान और जरूरी संचालन नियम एक स्थान पर
+            </p>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold">
+            ✓ 2 Co-Owners • 100% समान अधिकार
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Left: Authorized Co-Owners & Active Session */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-amber-500" />
+                <span>अधिकृत सुपर-एडमिन / को-ओनर ईमेल (firestore.rules लॉक्ड)</span>
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {firebaseSystemInfo.superAdminEmails.map((email) => {
+                const isCurrentSession =
+                  firebaseSystemInfo.currentUserEmail?.toLowerCase().trim() === email.toLowerCase();
+                return (
+                  <div
+                    key={email}
+                    className={`p-2.5 rounded-lg border flex flex-wrap items-center justify-between gap-2 ${
+                      isCurrentSession
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-900 dark:text-white break-all">
+                        {email}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Role: Owner (10,000 Quota) • Verified Google Auth Required
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isCurrentSession ? (
+                        <span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-extrabold">
+                          ● आपका सक्रिय सत्र
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 text-[10px] font-bold">
+                          👑 को-ओनर
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70 text-[11px] text-amber-950 dark:text-amber-200 leading-relaxed">
+              <strong>लाइव सिंक नियम:</strong> दोनों ओनर एक ही लाइव Firestore डेटाबेस से जुड़े हैं। किसी एक ओनर द्वारा छात्र कोटा बदलना, पेमेंट अप्रूव करना या ब्रांडिंग/नियम अपडेट करना तुरंत दूसरे ओनर व सभी छात्रों के लिए लागू हो जाता है।
+            </div>
+          </div>
+
+          {/* Right: Firebase Cloud & Payment Config Snapshot */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Server className="w-4 h-4 text-indigo-500" />
+                <span>Firebase क्लाउड एवं इंजन कॉन्फ़िगरेशन</span>
+              </span>
+              <a
+                href={firebaseSystemInfo.firebaseConsoleUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+              >
+                <span>Firebase Console</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500">Project ID:</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <code className="font-mono font-bold text-slate-900 dark:text-white text-[11px] truncate">
+                    {firebaseSystemInfo.projectId}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopySysValue('projectId', firebaseSystemInfo.projectId, 'Project ID')}
+                    className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 cursor-pointer"
+                    title="Project ID कॉपी करें"
+                  >
+                    {copiedSysKey === 'projectId' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500 shrink-0">Firestore DB:</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <code className="font-mono font-bold text-slate-900 dark:text-white text-[11px] truncate" title={firebaseSystemInfo.firestoreDatabaseId}>
+                    {firebaseSystemInfo.firestoreDatabaseId}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopySysValue('dbId', firebaseSystemInfo.firestoreDatabaseId, 'Firestore Database ID')}
+                    className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 cursor-pointer shrink-0"
+                    title="Database ID कॉपी करें"
+                  >
+                    {copiedSysKey === 'dbId' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500">AI मॉडल कैस्केड:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white text-[11px]">
+                  gemini-4-hydrogen → gemini-3.8-flash
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500">सक्रिय UPI व अप्रूवल:</span>
+                <span className="font-bold text-slate-900 dark:text-white text-[11px] truncate">
+                  {platformPolicy.ownerUpiId || '9554jitendrakumar@upi'} •{' '}
+                  {platformPolicy.paymentApprovalMode === 'manual' ? 'Manual 1-Click' : 'Auto UTR'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible Firestore Collections & Security Access Matrix */}
+        <div className="border-t border-slate-100 dark:border-slate-700 pt-3 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+              डेटाबेस कलेक्शन एवं सुरक्षा अधिकार मैट्रिक्स ({firebaseSystemInfo.collections.length} कलेक्शन)
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCollectionsMatrix((prev) => !prev)}
+              className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+            >
+              {showCollectionsMatrix ? 'मैट्रिक्स छिपाएँ ▲' : 'पूरी सुरक्षा मैट्रिक्स देखें ▼'}
+            </button>
+          </div>
+
+          {showCollectionsMatrix && (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300">
+                  <tr>
+                    <th className="px-3 py-2 font-extrabold">Firestore Path</th>
+                    <th className="px-3 py-2 font-extrabold">क्या सेव होता है</th>
+                    <th className="px-3 py-2 font-extrabold">दोनों को-ओनर अधिकार</th>
+                    <th className="px-3 py-2 font-extrabold">छात्र अधिकार</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                  {firebaseSystemInfo.collections.map((col) => (
+                    <tr key={col.path}>
+                      <td className="px-3 py-2 font-mono text-[11px] font-bold text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+                        {col.path}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{col.purpose}</td>
+                      <td className="px-3 py-2 font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                        {col.ownerAccess}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {col.studentAccess}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Essential Owner Operations Checklist */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11px]">
+            <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+              <strong className="text-slate-900 dark:text-white block mb-0.5">1. शेयर लिंक नियम:</strong>
+              छात्रों को हमेशा <code>ais-pre-...</code> लिंक भेजें, कभी भी <code>ais-dev-...</code> डेवलपमेंट लिंक न भेजें।
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+              <strong className="text-slate-900 dark:text-white block mb-0.5">2. साप्ताहिक बैकअप:</strong>
+              हर सप्ताह ऊपर दिए बटन से <code>.json</code> मास्टर बैकअप डाउनलोड करके Google Drive में रखें।
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+              <strong className="text-slate-900 dark:text-white block mb-0.5">3. फ्री टियर सीमा:</strong>
+              20,000 राइट्स/दिन (~3,000+ कॉपियाँ/दिन) फ्री हैं; इससे अधिक ट्रैफ़िक पर Firebase Console से Blaze Plan ऑन करें।
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 3. Non-Coder Founder's Master Handbook & Scaling Playbook */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700 pb-3">
@@ -1035,10 +1258,10 @@ export const FounderCommandCenterTab: React.FC<FounderCommandCenterTabProps> = (
 
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1.5">
               <div className="font-extrabold text-slate-900 dark:text-white text-sm">
-                4. ओनर मास्टर अधिकार (Super Admin Rights)
+                4. ओनर मास्टर अधिकार (Co-Owner Super Admin Rights)
               </div>
               <p className="text-slate-600 dark:text-slate-300">
-                आपका ईमेल (<strong>9554jitendrakumar@gmail.com</strong>) सिस्टम के सुरक्षा नियमों (<code>firestore.rules</code>) में सुपर-एडमिन के रूप में लॉक है। केवल आप ही कोटा बदल सकते हैं, पेमेंट अप्रूव कर सकते हैं और ब्रांडिंग नियम बदल सकते हैं।
+                दोनों ओनर ईमेल (<strong>{SUPER_ADMIN_EMAILS.join(' और ')}</strong>) सिस्टम के सुरक्षा नियमों (<code>firestore.rules</code>) में सुपर-एडमिन के रूप में लॉक हैं। केवल ये दोनों ही कोटा बदल सकते हैं, पेमेंट अप्रूव कर सकते हैं, सभी कॉपियाँ देख सकते हैं और ब्रांडिंग नियम बदल सकते हैं।
               </p>
             </div>
           </div>
