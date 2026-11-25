@@ -39,80 +39,7 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export const SUPER_ADMIN_EMAILS = [
-  '9554jitendrakumar@gmail.com',
-  'jkkbhu1995@gmail.com',
-] as const;
-export const SUPER_ADMIN_EMAIL = SUPER_ADMIN_EMAILS[0];
-
-export function isSuperAdminEmailString(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const normalized = email.toLowerCase().trim();
-  return SUPER_ADMIN_EMAILS.some((allowed) => allowed.toLowerCase() === normalized);
-}
-
-export function getFirebaseSystemInfo() {
-  return {
-    projectId: firebaseConfig.projectId,
-    authDomain: firebaseConfig.authDomain,
-    firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
-    storageBucket: firebaseConfig.storageBucket,
-    superAdminEmails: [...SUPER_ADMIN_EMAILS],
-    currentUserEmail: auth.currentUser?.email || null,
-    currentUserVerified: Boolean(auth.currentUser?.emailVerified),
-    firebaseConsoleUrl: `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId}/data`,
-    collections: [
-      {
-        path: '/platform_settings/global',
-        purpose: 'संस्थान ब्रांडिंग, डिफ़ॉल्ट छात्र कोटा, पेमेंट मोड (Auto/Manual) व UPI ID',
-        ownerAccess: 'Read / Write / Delete',
-        studentAccess: 'Read Only',
-      },
-      {
-        path: '/student_profiles/{userId}',
-        purpose: 'पंजीकृत छात्रों व परीक्षकों का रोल, स्टेटस, कोटा लिमिट और उपयोग गिनती',
-        ownerAccess: 'All Profiles (List/Edit/Delete)',
-        studentAccess: 'Own Profile Only (+1 Usage / Top-Up)',
-      },
-      {
-        path: '/quota_requests/{requestId}',
-        purpose: 'UPI पेमेंट एवं 12-अंकीय UTR कोटा अपग्रेड अनुरोध',
-        ownerAccess: 'All Requests (Approve/Reject/Delete)',
-        studentAccess: 'Own Requests (Create/View)',
-      },
-      {
-        path: '/user_configs/{userId}',
-        purpose: 'प्रॉम्प्ट स्लॉट्स (1–5), AI मॉडल सेटिंग्स व रूब्रिक नियम',
-        ownerAccess: 'Full Access (All Users)',
-        studentAccess: 'Own Config Only',
-      },
-      {
-        path: '/user_configs/{userId}/evaluations/{evalId}',
-        purpose: 'मूल्यांकित कॉपी स्कोरकार्ड, लाल-पेन टिप्पणियाँ और कंप्रेस्ड पृष्ठ',
-        ownerAccess: 'Inspect / Edit / Delete All Copies',
-        studentAccess: 'Own Copies Only',
-      },
-      {
-        path: '/user_configs/{userId}/learning_logs/{logId}',
-        purpose: 'मानव परीक्षक सुधार एवं AI लर्निंग डेटाबेस लॉग्स',
-        ownerAccess: 'Full Access',
-        studentAccess: 'Own Logs Only',
-      },
-      {
-        path: '/feedback/{feedbackId}',
-        purpose: 'मूल्यांकन सुझावों पर छात्रों द्वारा भेजे गए फीडबैक',
-        ownerAccess: 'View / Manage All',
-        studentAccess: 'Own Feedback Only',
-      },
-      {
-        path: '/admins/{adminUid}',
-        purpose: 'अतिरिक्त विश्वसनीय एडमिन रजिस्ट्री (केवल सुपर-एडमिन द्वारा प्रबंधित)',
-        ownerAccess: 'Full Control (Super Admin Only)',
-        studentAccess: 'No Access',
-      },
-    ],
-  };
-}
+export const SUPER_ADMIN_EMAIL = '9554jitendrakumar@gmail.com';
 
 // ============================================================================
 // FIRESTORE WRITE QUOTA CIRCUIT BREAKER, RATE LIMITER & DEDUPLICATION FIREWALL
@@ -272,7 +199,11 @@ function shouldSkipDuplicateWrite(path: string, payload: Record<string, any>): b
 }
 
 export function isSuperAdminUser(user: User | null | undefined): boolean {
-  return Boolean(user && isSuperAdminEmailString(user.email));
+  return Boolean(
+    user &&
+      user.email &&
+      user.email.toLowerCase().trim() === SUPER_ADMIN_EMAIL.toLowerCase()
+  );
 }
 
 export enum OperationType {

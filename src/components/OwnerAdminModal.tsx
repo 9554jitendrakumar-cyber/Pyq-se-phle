@@ -31,8 +31,6 @@ import localforage from 'localforage';
 import { FounderCommandCenterTab } from './FounderCommandCenterTab';
 import {
   auth,
-  SUPER_ADMIN_EMAILS,
-  isSuperAdminEmailString,
   isSuperAdminUser,
   signInWithGoogle,
   StudentProfileData,
@@ -487,7 +485,7 @@ export const OwnerAdminModal: React.FC<OwnerAdminModalProps> = ({
         await fetchStudentsList();
         showToast('☁️ ओनर क्लाउड अकाउंट सफलतापूर्वक जुड़ गया और छात्र सूची सिंक हो गई!');
       } else {
-        showToast(`⚠️ कृपया अधिकृत ओनर ईमेल (${SUPER_ADMIN_EMAILS.join(' या ')}) से लॉगिन करें।`);
+        showToast('⚠️ कृपया ओनर ईमेल (9554jitendrakumar@gmail.com) से लॉगिन करें।');
       }
     } catch (err) {
       console.warn('Owner cloud sign-in cancelled or failed:', err);
@@ -987,7 +985,7 @@ export const OwnerAdminModal: React.FC<OwnerAdminModalProps> = ({
                 ) : (
                   <div className="space-y-2.5">
                     {filteredStudents.map((st) => {
-                      const isOwnerRow = st.role === 'owner' || isSuperAdminEmailString(st.email);
+                      const isOwnerRow = st.role === 'owner';
                       const isUpdating = updatingStudentId === st.ownerId;
                       const usagePct =
                         st.quotaLimit > 0 ? Math.min(100, Math.round((st.usedCount / st.quotaLimit) * 100)) : 100;
